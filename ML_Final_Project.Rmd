@@ -1,0 +1,199 @@
+---
+title: "ML Final Project"
+output: html_document
+---
+# *Purpose*
+The goal of the project is to predict if people perform a dumbel exercise correct or incorrectly. Based on based on data from accelerometers on the belt, forearm, arm, and dumbell the system is expected to identify the correct execution, or 4 types of faulty executions. 
+
+# *Dataset*
+The training data set is comprised of 159 features and 19622 samples. The test data set is has 20 samples. The outcome variable is a factor variable named "classe" with levels "A"-"E", which represents of excersie performance category. 
+
+```{r echo=FALSE, message=FALSE}
+library(caret); library(randomForest)
+library(dplyr); library(stats)
+library(corrplot); library(data.table)
+library(rpart); library(party); library(gbm)
+
+## Download Assignment Files and read into memory
+if(!file.exists("data")){dir.create("data")}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv" , destfile= "./data/pml-training.csv")   
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv" , destfile= "./data/pml-testing.csv") 
+dateDownloaded <- date()
+## read files into memory
+trainRaw<- read.csv("./data/pml-training.csv")
+testRaw <- read.csv("./data/pml-testing.csv")
+```
+
+
+
+## *Feature Reduction & EDA*
+### Extract Raw Sensors' Data Only
+The train set has measurement features of the 3 sensors, and many calculated fields such as "average" "std" that summarise sensor data for a "window" of time.  Unfortunately the test set does not include any values for those calculated fields, it would be impossible for any model to predict using those variables.    The first feature reduction was to extract only the *sensors' data features*, and ignore all others. The resulting reduced features is shown in *Figure 1* in the *Appendix* Only 40 features reamained.
+
+```{r echo=TRUE}
+# cleaning the data - reducing variables
+# creating a table without the calculated fields, only raw measurements
+
+Index <- grepl("^classe|^roll|^pitch|^yaw|^total_|^gyros|^magnet", names(trainRaw))
+train <- trainRaw[, Index]
+test <- testRaw[, Index]
+dim(train)
+```
+
+
+### Identify and Remove Correlated Predictors
+Next, we computed a correlation matrix and a plot as shown in  *Figure 2* in the *Appendix*.    There are several highly corrleated features, so we removed them as follows: 
+```{r echo=TRUE}
+train.cor <- cor(train[,-ncol(train)]) # exclude the last variable = "classe"
+# remove predictors with corr > 0.7
+highlyCor <- findCorrelation(train.cor, 0.70)
+train.filtered <- train[,-highlyCor]
+dim(train.filtered)  
+#remove the same predictors from the test for future use
+test.filtered <- test[, -highlyCor]
+cat("Number of features in the filtered dataset: ", dim(train.filtered)[2]-1)
+```
+
+## *Study Design*
+From the training data we sampled 5 folds of "train" and "test" in order to 
+experiment with variuos models and configurations and to select the best model.  Since we plan on using also random forest algorithm, it is extremly important to user cross validation, and to run the model on more than one dataset.   
+```{r echo=TRUE}
+# createFolds returns list of indices
+set.seed(654913)
+folds.train <- createFolds(y=train.filtered$classe, k=5, list=TRUE, returnTrain=TRUE)
+folds.test <- createFolds(y=train.filtered$classe, k=5, list=TRUE, returnTrain=FALSE)
+```
+```{r echo=FALSE}
+cat("Number of samples in each training Fold :", length(folds.train$Fold1))
+cat("Number of samples in each testing Fold :", length(folds.test$Fold1))
+```
+## *Model Fitting*     
+### Random Forest on 1st Fold           
+We fitted a random forest model as it is considred one of the most accurate algorithms. Then used the model to make prediction on the 1st test fold, and we ran confusionMatrix to check accuracy.  
+```{r echo=TRUE}
+set.seed(43211)
+rf1Time <- system.time({
+rfFit1<-randomForest(classe ~ ., data = train.filtered[folds.train$Fold1, ], method="rf", prox=TRUE, ntree=500)
+})
+
+## predict results with random forest model for 1 test fold 
+predRF1 <- predict(rfFit1, train.filtered[folds.test$Fold1, ] )
+
+## compare model prediction with test fold 
+confMat1 <- confusionMatrix(predRF1, train.filtered[folds.test$Fold1, ]$classe)
+```
+This run has produced *fantastic accuracy* as can be seen in the confustion matrix below: 
+```{r echo=FALSE}
+print(confMat1)
+cat("This model run elapsed time is ", rf1Time[3], " seconds.\n")
+```
+
+### Random Forest on 2nd and 3rd Folds       
+In order to validate the random forest model we applied it on 2 more test folds.       
+```{r echo=FALSE}
+#Fold 2- validation
+## predict results with rfFit1 on 2nd test fold 
+predRF2 <- predict(rfFit1, train.filtered[folds.test$Fold2, ] )
+
+## compare model prediction with test fold 
+confMat2 <- confusionMatrix(predRF2, train.filtered[folds.test$Fold2, ]$classe)
+
+#Fold 3- validation#
+## predict model results with rfFit1  for 3rd test fold 
+predRF3 <- predict(rfFit1, train.filtered[folds.test$Fold3, ] )
+
+## compare model prediction with test fold 
+confMat3 <- confusionMatrix(predRF3, train.filtered[folds.test$Fold3, ]$classe)
+
+cat("Random Forest on 2nd fold has produced the following accuracy: \n")
+print(confMat2$overall)
+
+cat("Random Forest on 3nd fold has produced the following accuracy: \n")
+print(confMat3$overall)
+```
+
+### Boosting GBM Algorithm on 4th Fold
+While the first model produced excellent results we wanted to experiment with the Boosting algorithm:   
+```{r echo=TRUE, message=FALSE}
+gbmTime <- system.time({
+gbmFit <-train(classe ~ ., data=train.filtered[folds.train$Fold4, ], method="gbm", verbose = FALSE)
+})  
+## predict model results 
+gbmPred <- predict(gbmFit, train.filtered[folds.test$Fold4, ] )
+## compare model prediction with test fold 
+confMatGbm <- confusionMatrix(gbmPred, train.filtered[folds.test$Fold4, ]$classe)
+```
+
+```{r echo=FALSE, message=FALSE}
+cat("Boosting GBM on 4th fold has produced accuracy of: ")
+print(confMatGbm$overall)
+cat("Boosting GBM on 4th fold elapsed time is: ", gbmTime[3], " seconds.\n")
+```
+The boosting results were not as good as the random forest, and it took longer time to process.        
+
+###Regression Tree Algorithm on 5th Fold
+Finally, we applied a simpler and faster regression tree algorithm on the last fold.      
+```{r echo=FALSE}
+treeTime <- system.time({
+treeFit <-train(classe ~ ., data=train.filtered[folds.train$Fold5, ], method="rpart")
+})  
+
+## predict results of model for 5th test fold 
+treePred <- predict(treeFit, train.filtered[folds.test$Fold5, ] )
+
+## compare model prediction with test fold 
+confMatTree <- confusionMatrix(treePred, train.filtered[folds.test$Fold5, ]$classe)
+
+cat("Regression Tree model on 5th Fold has produced the following accuracy:")
+print(confMatTree$overall)
+cat("Regression Tree model on 5th Fold elapsed time is: ", treeTime[3], " seconds.\n")
+```
+Clearly the performance of the regression tree model is not satisfactory!
+
+## *Prediction of Test Set* 
+The best accuracy was produced by the random forest model. Hence, we'll run it on the original test data:  
+```{r echo=TRUE}
+predict.test <- predict(rfFit1, test.filtered)
+answers <- as.character(predict.test)
+cat("The prediction of classes to test set is:\n", answers,"\n")
+```
+
+These predictions were uploaded to the course assignment system and verified to be 100% correct.
+
+## *Out-of-Sample Error* 
+The expected error may be caluclated based on the average performance of the runs of random forest on three different validation folds as follows:  
+```{r echo=TRUE}
+AverageAccuracy <- (confMat1$overall[1]+confMat2$overall[1]+confMat3$overall[1])/3
+error <- 1 - AverageAccuracy
+cat("The expected out sample error is:", error)
+```
+
+
+
+
+
+#Appendix - Graphs and Compute Output
+
+###Figure 1 - Names of Selected Features   
+
+
+After extracting the sensors' raw data - only 40 features remain :
+```{r echo=TRUE}
+names(train)
+```
+
+After filtering out the correlated features (>0.7) - only 29 features remain: 
+```{r echo=TRUE}
+names(train.filtered)
+```
+
+###Figure 2 - Feature Correlation Matrix       
+
+```{r echo=TRUE}
+corrplot(train.cor, order = "hclust")  # plot the correlation matrix
+```
+
+###Figure 3 - R Packages' Versions
+```{r echo=FALSE}
+sessionInfo()
+```
