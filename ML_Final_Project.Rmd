@@ -75,6 +75,7 @@ set.seed(43211)
 rf1Time <- system.time({
 rfFit1<-randomForest(classe ~ ., data = train.filtered[folds.train$Fold1, ], method="rf", prox=TRUE, ntree=500)
 })
+saveRDS(rf1Time, "rfFit1.rds")    # saves the model to disk. To load use: rfFit1 <- readRDS("rfFit1.rds")
 
 ## predict results with random forest model for 1 test fold 
 predRF1 <- predict(rfFit1, train.filtered[folds.test$Fold1, ] )
@@ -117,7 +118,8 @@ While the first model produced excellent results we wanted to experiment with th
 ```{r echo=TRUE, message=FALSE}
 gbmTime <- system.time({
 gbmFit <-train(classe ~ ., data=train.filtered[folds.train$Fold4, ], method="gbm", verbose = FALSE)
-})  
+}) 
+saveRDS(gbmFit, "gbmFit.rds")  #save model to disk.  Possible to use latter with gbmFit<-readRDS("gbmFit.rds")
 ## predict model results 
 gbmPred <- predict(gbmFit, train.filtered[folds.test$Fold4, ] )
 ## compare model prediction with test fold 
@@ -136,7 +138,8 @@ Finally, we applied a simpler and faster regression tree algorithm on the last f
 ```{r echo=FALSE}
 treeTime <- system.time({
 treeFit <-train(classe ~ ., data=train.filtered[folds.train$Fold5, ], method="rpart")
-})  
+}) 
+saveRDS(treeFit, "treeFit.rds")  #save model to disk.  Possible to use latter with treeFit<-readRDS("treeFit.rds")
 
 ## predict results of model for 5th test fold 
 treePred <- predict(treeFit, train.filtered[folds.test$Fold5, ] )
